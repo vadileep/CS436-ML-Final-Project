@@ -91,6 +91,7 @@ def get_convolution_1d(
     resid=False,
     bias=True,
     arbitrary_size=False,
+    channel_distribution=None,
 ):
     r"""1D oriented convolution.
 
@@ -108,10 +109,51 @@ def get_convolution_1d(
         bias (bool): Use bias. Default: True.
     """
     assert in_channels == out_channels == groups
-    theta = [
-        theta_offset(channel_cycle_offset(k, in_channels, N) + layer_offset)
-        for k in range(in_channels)
-    ]
+    print("creating conv1d with channel_distribution =", channel_distribution)
+    if channel_distribution is None:
+        theta = [
+            theta_offset(channel_cycle_offset(k, in_channels, N) + layer_offset)
+            for k in range(in_channels)
+        ]
+    else:
+        # 1. Validate the channel_distribution argument
+        if len(channel_distribution) != N:
+            raise ValueError(
+                f"channel_distribution length ({len(channel_distribution)}) must equal N ({N})"
+            )
+        if abs(sum(channel_distribution) - 1.0) > 1e-6:
+            raise ValueError(
+                f"channel_distribution fractions must sum to 1.0, but sum to {sum(channel_distribution)}"
+            )
+            
+        # 2. Calculate the number of channels for each group
+        channel_splits = []
+        running_total = 0
+        for i in range(N - 1):
+            # Calculate channels for this group based on its fraction
+            num_channels = int(round(in_channels * channel_distribution[i]))
+            channel_splits.append(num_channels)
+            running_total += num_channels
+        
+        # 3. Assign all remaining channels to the last group to ensure the total is exact
+        channel_splits.append(in_channels - running_total)
+        
+        # 4. Create the theta list based on these splits
+        theta = []
+        base_offsets = [n / N for n in range(N)] # Base offsets: [0.0, 0.125, 0.25, ...]
+        
+        for i in range(N):
+            num_channels_in_group = channel_splits[i]
+            
+            # Get the base offset (e.g., 0.25) and add the layer offset (e.g., 0.5)
+            final_offset = base_offsets[i] + layer_offset
+            
+            # Convert the final offset to radians (e.g., theta_offset(0.75) -> 135 deg)
+            angle_rad = theta_offset(final_offset)
+            
+            # Add this angle to the list for each channel in this group
+            theta.extend([angle_rad] * num_channels_in_group)
+    
     conv = DepthwiseOrientedConv1d(
         in_channels=in_channels,
         out_channels=in_channels,
@@ -140,7 +182,7 @@ class Stem1D(nn.Module):
     """
 
     def __init__(
-        self, dim0, dim1, dim2, kernel_size, enable_layer_cycle=0, arbitrary_size=False
+        self, dim0, dim1, dim2, kernel_size, enable_layer_cycle=0, arbitrary_size=False, channel_distribution=None,
     ):
         super().__init__()
 
@@ -159,6 +201,7 @@ class Stem1D(nn.Module):
             resid=False,
             layer_offset=layer_wise_rotation_offset(0, 2, enable_layer_cycle),
             arbitrary_size=arbitrary_size,
+            channel_distribution=channel_distribution,
         )
         self.dw2 = get_convolution_1d(
             dim1,
@@ -171,6 +214,7 @@ class Stem1D(nn.Module):
             resid=False,
             layer_offset=layer_wise_rotation_offset(1, 2, enable_layer_cycle),
             arbitrary_size=arbitrary_size,
+            channel_distribution=channel_distribution,
         )
         self.norm1 = LayerNorm(dim1, eps=1e-6, data_format="channels_last")
         self.norm2 = LayerNorm(dim1, eps=1e-6, data_format="channels_last")
@@ -273,6 +317,7 @@ class Block1D(nn.Module):
         layer_scale_init_value=1e-6,
         layer_offset=0,
         arbitrary_size=False,
+        channel_distribution=None,
     ):
         super().__init__()
 
@@ -300,6 +345,7 @@ class Block1D(nn.Module):
             layer_offset=layer_offset,
             bias=True,
             arbitrary_size=arbitrary_size,
+            channel_distribution=channel_distribution,
         )
 
     def forward(self, x):
@@ -340,6 +386,7 @@ class Block1DPP(nn.Module):
         layer_scale_init_value=1e-6,
         layer_offset=0,
         arbitrary_size=False,
+        channel_distribution=None,
     ):
         super().__init__()
 
@@ -366,6 +413,7 @@ class Block1DPP(nn.Module):
             N=N,
             layer_offset=layer_offset,
             arbitrary_size=arbitrary_size,
+            channel_distribution=channel_distribution,
         )
         # use residual connection and nhwc format for dwconv2
         self.dwconv2 = get_convolution_1d(
@@ -379,6 +427,7 @@ class Block1DPP(nn.Module):
             N=N,
             layer_offset=layer_offset,
             arbitrary_size=arbitrary_size,
+            channel_distribution=channel_distribution,
         )
 
     def forward(self, x):
@@ -521,6 +570,7 @@ class ConvNeXt(nn.Module):
         N=8,
         stem_dim1=64,
         arbitrary_size=False,
+        channel_distribution=None,
         **kwargs,
     ):
         super().__init__()
@@ -542,6 +592,7 @@ class ConvNeXt(nn.Module):
                 kernel_size=kernel_size,
                 enable_layer_cycle=enable_layer_cycle,
                 arbitrary_size=arbitrary_size,
+                channel_distribution=channel_distribution,
             )
 
         self.downsample_layers = (
@@ -572,9 +623,11 @@ class ConvNeXt(nn.Module):
                         layer_scale_init_value=layer_scale_init_value,
                         kernel_sizes=kernel_sizes[i],
                         layer_offset=layer_wise_rotation_offset(
+
                             j, depths[i], enable_layer_cycle
                         ),
                         arbitrary_size=arbitrary_size,
+                        channel_distribution=channel_distribution,
                     )
                     for j in range(depths[i])
                 ]
