@@ -198,6 +198,13 @@ def get_args_parser():
     parser.add_argument('--show_flops', type=str2bool, default=True, 
                         help="Display FLOPS at start of training")
 
+    # NEW: Custom channel distribution argument
+    parser.add_argument('--channel_dist', 
+                    nargs='+', 
+                    type=float, 
+                    default=None, 
+                    help='List of channel fractions for each direction (e.g., 0.4 0.1 0.4 0.1)')
+
     return parser
 
 def main(args):
@@ -282,7 +289,8 @@ def main(args):
         drop_path_rate=args.drop_path,
         layer_scale_init_value=args.layer_scale_init_value,
         head_init_scale=args.head_init_scale,
-        variant=args.variant
+        variant=args.variant,
+        channel_distribution=args.channel_dist,
         )
 
 

@@ -15,4 +15,5 @@ python -m torch.distributed.launch --master_port=$((29500+$RANDOM%1000)) --nproc
     --output_dir ${OUTPUT_DIR:="output/$EXPERIMENT_NAME"} \
     --seed ${SEED:=0} \
     --model_ema 1 \
+    --channel_dist ${CHANNEL_DIST:=0.4 0.1 0.4 0.1} \
     ${EXTRA:=""}
